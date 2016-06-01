@@ -151,6 +151,13 @@ def main(argv=None):
 ################################################################################
 skim_template=r"""
 #!/bin/zsh
+clean_up () {{
+    ls -l
+    exit
+}}
+#LSF signals according to http://batch.web.cern.ch/batch/lsf-return-codes.html
+trap clean_up HUP INT TERM SEGV USR2 XCPU XFSZ IO
+
 cwd=$(pwd)
 cd {CMSSW_BASE:s}/src
 eval `scramv1 runtime -sh`
@@ -162,24 +169,37 @@ sed -i "s/\(process = cms.Process(\"\)ALCA\(\")\)/\1ALCATEST\2/" RunAlcaSkimming
 mv RunAlcaSkimmingCfg.py {sub_dir:s}/RunAlcaSkimmingCfg_{count:d}.py
 cmsRun {sub_dir:s}/RunAlcaSkimmingCfg_{count:d}.py
 {eos:s} cp {skim:s}_{count:d}.root {eos_dir:s}/
-ls -l
+
+clean_up
 """
 
 harvest_template=r"""
 #!/bin/zsh
+clean_up () {{
+    ls -l
+    gzip *.dat *.txt *.db
+    gzip pede.dump
+    gzip millepede.res
+    gzip millepede.log
+    gzip millepede.end
+    for f in $(ls --color=never *.gz)
+    do
+        {eos:s} cp ${{f}} {eos_dir:s}/
+    done
+    ls -l
+    exit
+}}
+#LSF signals according to http://batch.web.cern.ch/batch/lsf-return-codes.html
+trap clean_up HUP INT TERM SEGV USR2 XCPU XFSZ IO
+
 cwd=$(pwd)
 cd {CMSSW_BASE:s}/src
 eval `scramv1 runtime -sh`
 cd ${{cwd}}
 cmsRun {sub_dir:s}/RunAlcaHarvestingCfg.py &
 {mem_usage:s} 5 cmsRun {sub_dir:s}/pede_memory_report.txt
-ls -l
-gzip *.dat *.txt *.db
-for f in $(ls --color=never *.gz)
-do
-    {eos:s} cp ${{f}} {eos_dir:s}/
-done
-ls -l
+
+clean_up
 """
 
 
