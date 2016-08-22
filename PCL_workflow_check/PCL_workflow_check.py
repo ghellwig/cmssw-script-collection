@@ -152,7 +152,9 @@ def main(argv=None):
 skim_template=r"""
 #!/bin/zsh
 clean_up () {{
+    {eos:s} cp {skim:s}_{count:d}.root {eos_dir:s}/
     ls -l
+    echo "Disk usage: $(du -h -s | sed 's/\t\.//') ($(du -s | sed 's/\t\.//'))"
     exit
 }}
 #LSF signals according to http://batch.web.cern.ch/batch/lsf-return-codes.html
@@ -168,7 +170,6 @@ sed -i "s/\(input = cms.untracked.int32(\)10\()\)/\1 -1 \2/" RunAlcaSkimmingCfg.
 sed -i "s/\(process = cms.Process(\"\)ALCA\(\")\)/\1ALCATEST\2/" RunAlcaSkimmingCfg.py
 mv RunAlcaSkimmingCfg.py {sub_dir:s}/RunAlcaSkimmingCfg_{count:d}.py
 cmsRun {sub_dir:s}/RunAlcaSkimmingCfg_{count:d}.py
-{eos:s} cp {skim:s}_{count:d}.root {eos_dir:s}/
 
 clean_up
 """
@@ -177,6 +178,7 @@ harvest_template=r"""
 #!/bin/zsh
 clean_up () {{
     ls -l
+    echo "Disk usage: $(du -h -s | sed 's/\t\.//') ($(du -s | sed 's/\t\.//'))"
     gzip *.dat *.txt *.db
     gzip pede.dump
     gzip millepede.res
@@ -187,6 +189,7 @@ clean_up () {{
         {eos:s} cp ${{f}} {eos_dir:s}/
     done
     ls -l
+    echo "Disk usage: $(du -h -s | sed 's/\t\.//') ($(du -s | sed 's/\t\.//'))"
     exit
 }}
 #LSF signals according to http://batch.web.cern.ch/batch/lsf-return-codes.html

@@ -39,8 +39,7 @@ def main(argv = None):
                  linestyle = "",
                  label = title)
 
-    plt.legend(loc = 2, numpoints = 1)
-
+    plt.legend(bbox_to_anchor = (0.5, 1), loc = 8, numpoints = 1)
     ax = plt.gca()
     ax.set_xlabel("time [seconds]")
     ax.set_ylabel("rss [MB]")
