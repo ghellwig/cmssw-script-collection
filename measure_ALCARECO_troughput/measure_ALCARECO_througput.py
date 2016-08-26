@@ -1,9 +1,13 @@
 #!/usr/bin/env python
 
+import os
 import sys
+import time
+import shutil
 import signal
 import argparse
 import functools
+import subprocess
 import multiprocessing
 
 import Configuration.PyReleaseValidation.MatrixReader as MatrixReader
@@ -41,6 +45,8 @@ def main(argv = None):
                         metavar = "NUMBER", type = int, default = 100,
                         help = ("number of events to perform the measurement "
                                 "(default: '%(default)s')"))
+    parser.add_argument("-N", "--job-name", dest = "job_name", metavar = "ID",
+                        help = "name for the measurment job")
     parser.add_argument("--number-of-processes", dest = "number_of_processes",
                         metavar = "NUMBER", type = int, default = 4,
                         help = ("number of processes to be used "
@@ -51,13 +57,30 @@ def main(argv = None):
     parser.add_argument("-p", "--pull-request", dest = "pull_request",
                         type = int, metavar = "ID",
                         help = "measure changes introduced by this pull request")
+    parser.add_argument("-b", "--batch", dest = "batch", metavar = "QUEUE",
+                        help = ("submit job to QUEUE (NOTE: will be slower "
+                                "because multiprocessing does not work well on "
+                                "worker nodes)"))
 
     args = parser.parse_args(argv)
-    args = add_required_defaults(args)
 
     if args.list_input_choices:
         list_input_choices()
         sys.exit()
+
+    if not args.job_name:
+        args.job_name = get_unique_output_name()
+        sys.argv.extend(["-N", args.job_name])
+
+    if args.batch:
+        submit_to_batch(args.job_name)
+
+    args = add_required_defaults(args)
+
+    os.makedirs(args.job_name)
+    os.chdir(args.job_name)
+
+
 
     # workaround to deal with KeyboardInterrupts in the worker processes:
     # - ignore interrupt signals in workers (see initializer)
@@ -203,6 +226,69 @@ def run_workflows(input_step, args):
 
     return name
 
+
+def submit_to_batch(name):
+    """Submit the script to the batch.
+
+    Arguments:
+    - `name`: name of the batch job
+    """
+
+    # check first if proxy is set
+    try:
+        subprocess.check_call(["voms-proxy-info", "--exists"])
+    except subprocess.CalledProcessError:
+        print "Please initialize your proxy before submitting."
+        sys.exit(1)
+
+    local_proxy = subprocess.check_output(["voms-proxy-info", "--path"]).strip()
+
+    try:
+        index = sys.argv.index("-b")
+    except ValueError:
+        index = sys.argv.index("--batch")
+    queue = sys.argv[index+1]
+    del sys.argv[index:index+2]
+    sys.argv[0] = os.path.realpath(sys.argv[0])
+
+    os.makedirs(name)
+
+    submit_proxy = os.path.join(name, os.path.basename(local_proxy))
+    shutil.copyfile(local_proxy, submit_proxy)
+    script = script_template.format(command = " ".join(sys.argv),
+                                    user_proxy = os.path.realpath(submit_proxy),
+                                    job_name = name,
+                                    submit_dir = os.path.realpath(name),
+                                    **os.environ)
+    script_name = os.path.join(name, "submit.sh")
+    with open(script_name, "w") as f: f.write(script)
+    os.chmod(script_name, 0755)
+
+    subprocess.call(["bsub",
+                     "-q", queue,
+                     "-J", name,
+                     "-o", os.path.realpath(os.path.join(name, "submit.stdout")),
+                     "-e", os.path.realpath(os.path.join(name, "submit.stderr")),
+                     os.path.realpath(script_name)])
+    sys.exit()
+
+script_template="""\
+#!/bin/sh
+
+export X509_USER_PROXY={user_proxy}
+cwd=$(pwd)
+cd {CMSSW_BASE:s}/src
+eval `scramv1 runtime -sh`
+cd ${{cwd}}
+{command:s}
+cp -r {job_name}/* {submit_dir}/
+"""
+
+
+def get_unique_output_name():
+    """Returns unique output name."""
+
+    return "_".join(["ALCARECO", "throughput"]+time.ctime().split())
 
 ################################################################################
 if __name__ == "__main__":
