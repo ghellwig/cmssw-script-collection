@@ -14,6 +14,8 @@ import Configuration.PyReleaseValidation.MatrixReader as MatrixReader
 import Configuration.PyReleaseValidation.MatrixRunner as MatrixRunner
 import Configuration.PyReleaseValidation.relval_steps as relval_steps
 import Configuration.PyReleaseValidation.relval_production as relval_production
+import Configuration.AlCa.autoAlca as autoAlca
+
 
 ################################################################################
 def main(argv = None):
@@ -80,8 +82,6 @@ def main(argv = None):
     os.makedirs(args.job_name)
     os.chdir(args.job_name)
 
-
-
     # workaround to deal with KeyboardInterrupts in the worker processes:
     # - ignore interrupt signals in workers (see initializer)
     # - use a timeout of size sys.maxint to avoid a bug in multiprocessing
@@ -91,6 +91,9 @@ def main(argv = None):
     run_workflows_with_args = functools.partial(run_workflows, args = args)
     result = pool.map_async(run_workflows_with_args, args.inputs).get(sys.maxint)
     print result
+
+    analyze_test_results("before", "after") # dummy call until implemented
+
 
 ################################################################################
 def matrix_reader(args):
@@ -225,6 +228,22 @@ def run_workflows(input_step, args):
         mrunner.runTests(args)
 
     return name
+
+
+def analyze_test_results(before, after):
+    """Analyze results of tests before and after a certain change.
+    
+    Arguments:
+    - `before`: name of the output directory of the test before the change
+    - `after`: name of the output directory of the test after the change
+    """
+    
+    streams = autoAlca.autoAlca["allForPrompt"].split("+")
+    for s in streams: print s
+    raise StandardError, "Implement this!"
+    # need output of edmFileUtil -l file name
+    # file size, event count
+    # -> size/event, relative change + name of input dataset
 
 
 def submit_to_batch(name):
