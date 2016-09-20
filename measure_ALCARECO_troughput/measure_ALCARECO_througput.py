@@ -6,15 +6,16 @@ import time
 import shutil
 import signal
 import argparse
+import tempfile
 import functools
 import subprocess
 import multiprocessing
 
+import Configuration.AlCa.autoAlca as autoAlca
 import Configuration.PyReleaseValidation.MatrixReader as MatrixReader
 import Configuration.PyReleaseValidation.MatrixRunner as MatrixRunner
 import Configuration.PyReleaseValidation.relval_steps as relval_steps
 import Configuration.PyReleaseValidation.relval_production as relval_production
-import Configuration.AlCa.autoAlca as autoAlca
 
 
 ################################################################################
@@ -30,8 +31,11 @@ def main(argv = None):
         argv = sys.argv[1:]
 
     parser = argparse.ArgumentParser(description = "Measure ALCARECO throughput")
+    parser.add_argument("--cmssw", dest = "cmssw", metavar = "VERSION",
+                        required = True,
+                        help = "CMSSW to be used for the measurement")
     parser.add_argument("-i", "--input", dest = "inputs", metavar = "STEP",
-                        action = "append", default = [], required = True,
+                        action = "append", default = [],
                         help = ("input step as defined in"
                                 "'Configuration/PyReleaseValidation/python/"
                                 "relval_steps.py'; for multiple inputs use this"
@@ -69,6 +73,9 @@ def main(argv = None):
     if args.list_input_choices:
         list_input_choices()
         sys.exit()
+
+    if len(args.inputs) == 0:
+        parser.error("argument -i/--input is required")
 
     if not args.job_name:
         args.job_name = get_unique_output_name()
@@ -232,12 +239,12 @@ def run_workflows(input_step, args):
 
 def analyze_test_results(before, after):
     """Analyze results of tests before and after a certain change.
-    
+
     Arguments:
     - `before`: name of the output directory of the test before the change
     - `after`: name of the output directory of the test after the change
     """
-    
+
     streams = autoAlca.autoAlca["allForPrompt"].split("+")
     for s in streams: print s
     raise StandardError, "Implement this!"
@@ -308,6 +315,105 @@ def get_unique_output_name():
     """Returns unique output name."""
 
     return "_".join(["ALCARECO", "throughput"]+time.ctime().split())
+
+
+def setup_CMSSW(path, version, suffix = None):
+    """Create CMSSW area of `version` at `path`.
+
+    Arguments:
+    - `path`: path where the area is created
+    - `version`: CMSSW version
+    - `suffix`: suffix appended to CMSSW area name
+    """
+
+    area_name = version
+    if suffix: area_name += "_"+suffix
+
+    commands = (
+        "cd "+path,
+        "rm -rf "+area_name,
+        "scram project --name {} CMSSW {}".format(area_name, version),
+        "cd {}/src".format(area_name),
+        "eval `scramv1 runtime -sh`",
+        "git cms-init")
+
+    run_shell_commands(commands)
+
+    return os.path.join(path, area_name, "src")
+
+
+def pull_in_PR(path, PR_id):
+    """Merge a pull request with `PR_id` into a CMSSW area at `path`.
+
+    Arguments:
+    - `path`: path to the source directory of your CMSSW area
+    - `PR_id`: ID of the pull request of interest
+    """
+
+    commands = (
+        "cd "+path,
+        "eval `scramv1 runtime -sh`",
+        "git cms-merge-topic "+PR_id,
+        "scram build -j 4")
+
+    run_shell_commands(commands)
+
+
+def checkout_commit(path, commit):
+    """Checkout `commit` into a CMSSW area at `path`.
+
+    Arguments:
+    - `path`: path to the source directory of your CMSSW area
+    - `commit`: ID of the commit in the format <github_user>:<commit id>
+                the default user is 'official-cmssw'
+    """
+
+    commit = commit.split(":")
+    if len(commit) == 1:
+        repo, commit_id = "cms-sw", commit[0]
+    elif len(commit) == 2:
+        repo, commit_id = commit
+    else:
+        print "Unsupported format of commit ID:", ":".join(commit)
+        sys.exit(1)
+
+    commands = (
+        "cd "+path,
+        "eval `scramv1 runtime -sh`",
+        "git remote add {0:s} https://github.com/{0:s}/cmssw.git".format(repo),
+        "git fetch "+repo,
+        "git merge --no-ff --no-edit {0:s}/{1:s} 2> /dev/null"
+        " || git merge --no-ff --no-edit {1:s}".format(repo, commit_id),
+        "modified=$(git diff --name-only ${CMSSW_VERSION} HEAD"
+        " | awk -F'/' '{print $1\"/\"$2}' | uniq)",
+        "for p in ${modified}; do git cms-addpkg ${p}; done",
+        "scram build -j 4")
+
+    run_shell_commands(commands)
+
+
+def run_shell_commands(commands):
+    """
+    Creates a temporary shell script, executes it, and cleans up temporary files
+    afterwards.
+
+    Arguments:
+    - `commands`: list of string containg subsequent shell commands
+    """
+
+    script = "#!/bin/sh\n"
+    script += "\n".join(commands) + "\n"
+
+    try:
+        with tempfile.NamedTemporaryFile("w", delete = False) as tmp:
+            tmp.write(script)
+        os.chmod(tmp.name, 0755)
+        with open(os.devnull, "w") as dump:
+            # subprocess.check_call([tmp.name], stdout = dump, stderr = dump)
+            subprocess.check_call([tmp.name])
+    finally:
+        os.remove(tmp.name)
+
 
 ################################################################################
 if __name__ == "__main__":
